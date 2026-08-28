@@ -6,19 +6,20 @@ extern "C" {
 #endif
 
 /*
- * Return the standard two-sided polyBLEP correction for a discontinuity.
+ * Standard two-sided polyBLEP correction for a discontinuity at phase 0.
  *
  * t  : normalized phase in [0, 1)
  * dt : normalized phase increment per sample
  *
- * The returned value is the correction that should be added to a naive
- * waveform containing a unit downward step at phase 0/1.
+ * For a downward unit step, subtract the returned correction from the
+ * naive waveform. The function is zero away from the transition.
  */
 float polyblep(double t, double dt);
 
 /*
- * Apply a polyBLEP correction to a normalized sawtooth whose naive value is
- * 2*t - 1 and whose discontinuity at phase wrap has amplitude `step`.
+ * Apply a polyBLEP correction to a bipolar sawtooth whose naive value is
+ * 2*t - 1. `step` is the magnitude of the downward discontinuity at phase
+ * wrap; for a bipolar saw this is 2.
  */
 float polyblep_saw(double phase, double phase_increment, float step);
 
