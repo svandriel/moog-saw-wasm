@@ -3,7 +3,9 @@
 This repository implements the waveform-based phase-distortion model from:
 
 J. Pekonen, V. Lazzarini, J. Timoney, J. Kleimola, and V. Välimäki,
-"Discrete-Time Modelling of the Moog Sawtooth Oscillator Waveform", 2011.
+"Discrete-Time Modelling of the Moog Sawtooth Oscillator Waveform", 2011.[^paper]
+
+[^paper]: https://www.researchgate.net/publication/220057893_Discrete-Time_Modelling_of_the_Moog_Sawtooth_Oscillator_Waveform
 
 The paper compares two real-time models. It reports that the phase-distortion
 model closely matches the recorded Moog sawtooth waveform.
