@@ -8,7 +8,6 @@ float polyblep(double t, double dt)
         return 0.0f;
     }
 
-    /* PolyBLEP is meaningful while the transition spans at most one sample. */
     if (dt >= 1.0) {
         return 0.0f;
     }
@@ -28,14 +27,15 @@ float polyblep(double t, double dt)
 
 float polyblep_saw(double phase, double phase_increment, float step)
 {
-    /*
-     * A naive bipolar saw is 2*phase - 1. Its wrap is a downward step of
-     * amplitude 2. The correction is scaled by half the actual discontinuity
-     * so callers can also use this helper for differently scaled saws.
-     */
     phase -= floor(phase);
 
     const float naive = (float)(2.0 * phase - 1.0);
+
+    /*
+     * polyblep() is the correction for a unit downward step when SUBTRACTED
+     * from the naive waveform. Scale by half the requested discontinuity,
+     * because a bipolar saw has a step magnitude of 2.
+     */
     const float correction = polyblep(phase, phase_increment);
-    return naive + step * correction;
+    return naive - 0.5f * step * correction;
 }
