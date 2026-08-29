@@ -2,6 +2,14 @@
 
 Guidance for AI agents working in this repo.
 
+## All changes go through pull requests
+
+- Never push to `main` directly. Every change — code, docs, config — lands on
+  `main` only via a pull request.
+- Work happens on a feature branch (in a dedicated worktree), is pushed to
+  `origin`, then merged through a PR.
+- Keep PRs small and focused; one logical change per PR.
+
 ## Always use a git worktree
 
 - Never work directly on the main checkout. Create a dedicated git worktree
