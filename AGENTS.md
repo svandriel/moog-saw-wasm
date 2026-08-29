@@ -2,64 +2,81 @@
 
 Guidance for AI agents working in this repo.
 
+## All changes go through pull requests
+
+- Never push to `main` directly. Every change — code, docs, config — lands on
+  `main` only via a pull request.
+- Work happens on a feature branch (in a dedicated worktree), is pushed to
+  `origin`, then merged through a PR.
+- Keep PRs small and focused; one logical change per PR.
+
+## Always use a git worktree
+
+- Never work directly on the main checkout. Create a dedicated git worktree
+  for every piece of work (see `git worktree` / the existing `.worktrees/`
+  directory).
+- Before starting any session, update the worktree first: `git fetch --all`
+  then `git pull --ff-only` (or rebase) so you're never working from stale
+  state.
+
 ## Project
 
-C11 implementation of the Pekonen 2011 phase-distortion model of the Moog
-sawtooth oscillator, with an Emscripten/WASM wrapper. No runtime dependencies.
-
-The end goal is to ship this as an npm package (likely for AudioWorklet /
-browser use). No package.json exists yet — very early phase. Structure the
-WASM/ESM wrapper and keep the DSP core portable so it stays buildable toward
-that goal. Don't lock in a specific package layout until it's decided.
+Pure-Rust implementation of the Pekonen 2011 phase-distortion model of the
+Moog sawtooth oscillator. The core (`src/lib.rs`) is `#![no_std]`-clean and has
+zero runtime dependencies, so it builds for `wasm32-unknown-unknown` for a
+future AudioWorklet/npm package. `src/ffi.rs` holds the C-ABI exports.
+(Float math uses the pure-Rust `libm` crate — stable `core` has no
+`floor`/`cos`; the `core_float_math` re-addition is nightly-only.)
 
 ## Commands
 
-- `make` — build both native and WASM targets
-- `make native` — build `build/native/test_moog_saw`
-- `make test` — build and run native smoke tests (expect `all tests passed`)
-- `make wasm` — build `build/wasm/moog_saw.js` (requires `emcc` on PATH); output is ESM (`-sMODULARIZE=1 -sEXPORT_ES6=1`), so it's already consumable from a future npm wrapper
-- `make clean` — remove `build/`
+- `cargo build` — build the crate (rlib)
+- `cargo test` — numeric unit/integration tests + golden WAV fixture parity
 
 ## File layout
 
-- `include/moog_saw.h` — public C API (single header)
-- `src/moog_saw.c` — DSP core
-- `src/moog_saw_wasm.c` — Emscripten wrapper (included only in WASM build)
-- `tests/test_moog_saw.c` — native unit tests, run by `make test`
-- `dist/` — build artifacts (gitignored via `build/` only; `dist/` is untracked)
+- `src/lib.rs` — DSP core (`MoogSaw`, `p`, `waveform`)
+- `src/ffi.rs` — C-ABI exports for future WASM
+- `tests/dsp.rs` — ported numeric tests (parameter fit, progression, fractional
+  sync, explicit event)
+- `tests/fixture_parity.rs` — bit-exact parity vs. golden WAV fixtures
+- `tests/wav.rs` — minimal float32 WAV reader helper
+- `tests/fixtures/*.wav` — committed golden outputs (float32, mono, 48 kHz,
+  0.25 s, frequencies 55–3520 Hz)
 
 ## Conventions
 
-- C11, compiled with `-std=c11 -O2 -Wall -Wextra -Wpedantic`; keep warning-free.
-- Prefix public symbols with `moog_saw_`; opaque struct returned via
-  `create`/`destroy`.
-- Core API is in C with no WASM specifics; keep WASM-specific glue in
-  `src/moog_saw_wasm.c`.
+- `#![no_std]`; zero external runtime dependencies; float math via
+  `libm::{floor, cos}`, everything else via `core`.
 - DSP in normalized phase units `[0,1)`; output normalized to approximately
   `[-1,+1]`.
-- Add features as pure DSP plus tests in `tests/test_moog_saw.c`; run
-  `make test` after any DSP change.
+- Golden fixtures are the reference: keep DSP arithmetic bit-identical. If
+  arithmetic intentionally changes, regenerate fixtures and commit them
+  together.
+- Add behavior as pure Rust plus tests; run `cargo test` after any change.
 
 ## Key architecture notes
 
-- **Phase-distortion model**: `moog_saw_p()` gives frequency-dependent `P(f0)`
-  from the paper's linear fit; `moog_saw_waveform(phase, p)` evaluates the
-  waveform.
-- **Phase accumulator**: persistent state; `frequency == NULL` uses the
+- **Phase-distortion model**: `p(f0)` gives the frequency-dependent `P` from
+  the paper's linear fit; `waveform(phase, p)` evaluates the waveform.
+- **Phase accumulator**: persistent `phase`; `None` frequency uses the
   constant frequency set on the oscillator.
 - **Hard sync**: rising zero crossing when previous sync sample `<= 0` and
-  current `> 0`; zero crossing linearly interpolated in time. Oscillator
-  resets to phase 0 at the interpolated time.
-- **Two process paths**: `moog_saw_process()` is the block renderer
-  (audio-rate frequency/sync via arrays); `moog_saw_process_sample()` takes an
-  explicit event offset for oscillators that know the exact master phase-wrap
-  time (e.g. in an AudioWorklet engine).
+  current `> 0`; zero crossing linearly interpolated in time.
+- **Two process paths**: `process()` is the block renderer (audio-rate
+  frequency/sync via slices); `process_sample()` takes an explicit event
+  offset for oscillators that know the exact master phase-wrap time.
 
 ## Scope / limitations
 
 This models the waveform, not a complete anti-aliased oscillator. Oversampling,
-BLEP/BLAMP correction, and the browser-level AudioWorklet wrapper are expected
-to live outside this core C API.
+BLEP/BLAMP correction, the AudioWorklet processor, and the WASM artifact are
+out of scope here.
 
-WASM build is ESM/modularized, so the future npm wrapper should consume it
-directly from the WASM output rather than re-wrapping in extra glue.
+## Regenerating fixtures
+
+Golden fixtures were produced by the original C implementation (float32 WAV,
+mono, 48 kHz, 0.25 s, frequencies `{55, 110, 220, 440, 880, 1760, 3520}` Hz)
+before it was deleted. They are the specification by example: if DSP arithmetic
+intentionally changes, regenerate the fixtures from the new implementation and
+commit them with the change.
