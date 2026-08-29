@@ -28,7 +28,8 @@ later — this phase ships a native Rust crate built for WASM from day one.
 ## Architecture
 
 Single crate at repo root: `moog_saw`, `crate-type = ["rlib"]`,
-with no external runtime dependencies. (cdylib is deliberately deferred
+with no external runtime dependencies (source-only `libm` for float
+math — see below). (cdylib is deliberately deferred
 to the WASM phase as a separate thin wrapper crate: combining `crate-type
 = ["cdylib", "rlib"]` with `#![no_std]` makes `cargo test` fail on stable
 Rust — rust-lang/rust#151083 — and the reference pattern for Rust audio
@@ -48,10 +49,14 @@ README.md
 .gitignore
 ```
 
-`lib.rs` must stay `#![no_std]`-clean: implement all math with `core`
-primitives (`f64::floor`, `f32::cos`, `f32::is_finite`, etc.) so the crate
-compiles unmodified for `wasm32-unknown-unknown` later. Integration tests may
-use `std`.
+`lib.rs` must stay `#![no_std]`-clean: float math via the pure-Rust `libm`
+crate (`libm::floor`, `libm::cos`); everything else (`is_finite`, casts,
+constants, comparisons) via `core`. Rationale: stable Rust 1.98 removed
+`f64::floor`/`f32::cos`/`sqrt` from `core` (they now live in `std` only;
+the `core` re-addition is nightly-only `core_float_math`, tracking issue
+#137578). `libm` is wasm-portable, and its `cos`/`floor` are bit-identical to
+glibc on the fixture output range (verified over a 1.2M-point sweep at f32
+granularity). Integration tests may use `std`.
 
 Rust edition: latest stable (2024 edition). Toolchain: stable rustc/cargo;
 no pinned MSRV.
