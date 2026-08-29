@@ -9,12 +9,14 @@ INCLUDE := -Iinclude
 SRC     := src/moog_saw.c
 WASM_SRC := $(SRC) src/moog_saw_wasm.c
 TEST_SRC := tests/test_moog_saw.c
+WAV_TEST_SRC := tests/generate_wav.c
 
 BUILD   := build
 NATIVE  := $(BUILD)/native
 WASM    := $(BUILD)/wasm
+WAV     := $(BUILD)/wav
 
-.PHONY: all native test wasm clean
+.PHONY: all native test wav wasm clean
 
 all: native wasm
 
@@ -26,6 +28,13 @@ $(NATIVE)/test_moog_saw: $(SRC) $(TEST_SRC) include/moog_saw.h
 
 test: $(NATIVE)/test_moog_saw
 	$(NATIVE)/test_moog_saw
+
+$(WAV)/generate_wav: $(SRC) $(WAV_TEST_SRC) include/moog_saw.h
+	@mkdir -p $(WAV)
+	$(CC) $(CFLAGS) $(INCLUDE) $(SRC) $(WAV_TEST_SRC) $(LDFLAGS) -o $@
+
+wav: $(WAV)/generate_wav
+	$(WAV)/generate_wav
 
 wasm: $(WASM)/moog_saw.js
 
