@@ -1,4 +1,5 @@
 #![no_std]
+extern crate alloc;
 
 const TWO_PI: f64 = 2.0 * core::f64::consts::PI;
 
@@ -146,3 +147,5 @@ impl MoogSaw {
         out
     }
 }
+
+mod ffi;
