@@ -1,4 +1,4 @@
-use moog_saw::{MoogSaw, p, waveform};
+use moog_saw::{MoogSaw, p};
 
 #[test]
 fn parameter_fit() {
