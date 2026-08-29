@@ -27,8 +27,12 @@ later — this phase ships a native Rust crate built for WASM from day one.
 
 ## Architecture
 
-Single crate at repo root: `moog_saw`, `crate-type = ["cdylib", "rlib"]`,
-with no external runtime dependencies.
+Single crate at repo root: `moog_saw`, `crate-type = ["rlib"]`,
+with no external runtime dependencies. (cdylib is deliberately deferred
+to the WASM phase as a separate thin wrapper crate: combining `crate-type
+= ["cdylib", "rlib"]` with `#![no_std]` makes `cargo test` fail on stable
+Rust — rust-lang/rust#151083 — and the reference pattern for Rust audio
+worklets keeps the DSP core as a host-tested rlib.)
 
 File layout after the port:
 
