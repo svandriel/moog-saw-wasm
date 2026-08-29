@@ -3,11 +3,12 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 
 #define SAMPLE_RATE 48000
-#define DURATION_SECONDS 5
-#define NUM_SAMPLES (SAMPLE_RATE * DURATION_SECONDS)
+#define DURATION_SECONDS 0.25
+#define NUM_SAMPLES ((int)(SAMPLE_RATE * DURATION_SECONDS))
 
 static void write_u16_le(FILE *file, uint16_t value)
 {
@@ -23,6 +24,13 @@ static void write_u32_le(FILE *file, uint32_t value)
     fputc((int)((value >> 24) & 0xffu), file);
 }
 
+static void write_f32_le(FILE *file, float value)
+{
+    uint32_t bits;
+    memcpy(&bits, &value, sizeof(bits));
+    write_u32_le(file, bits);
+}
+
 static int write_wav(const char *path, float frequency)
 {
     FILE *file = fopen(path, "wb");
@@ -31,21 +39,21 @@ static int write_wav(const char *path, float frequency)
         return 0;
     }
 
-    const uint32_t data_size = NUM_SAMPLES * sizeof(int16_t);
+    const uint32_t data_size = (uint32_t)NUM_SAMPLES * sizeof(float);
     const uint32_t riff_size = 36u + data_size;
 
-    /* RIFF/WAVE header: mono, 48 kHz, signed 16-bit PCM. */
+    /* RIFF/WAVE header: mono, 48 kHz, 32-bit IEEE float PCM (format 3). */
     fwrite("RIFF", 1, 4, file);
     write_u32_le(file, riff_size);
     fwrite("WAVE", 1, 4, file);
     fwrite("fmt ", 1, 4, file);
     write_u32_le(file, 16);
-    write_u16_le(file, 1);
+    write_u16_le(file, 3);
     write_u16_le(file, 1);
     write_u32_le(file, SAMPLE_RATE);
-    write_u32_le(file, SAMPLE_RATE * sizeof(int16_t));
-    write_u16_le(file, sizeof(int16_t));
-    write_u16_le(file, 16);
+    write_u32_le(file, SAMPLE_RATE * (uint32_t)sizeof(float));
+    write_u16_le(file, (uint16_t)sizeof(float));
+    write_u16_le(file, 32);
     fwrite("data", 1, 4, file);
     write_u32_le(file, data_size);
 
@@ -75,13 +83,7 @@ static int write_wav(const char *path, float frequency)
                 fclose(file);
                 return 0;
             }
-
-            float sample = buffer[i];
-            if (sample > 1.0f) sample = 1.0f;
-            if (sample < -1.0f) sample = -1.0f;
-
-            const int16_t pcm = (int16_t)lrintf(sample * 32767.0f);
-            write_u16_le(file, (uint16_t)pcm);
+            write_f32_le(file, buffer[i]);
         }
 
         remaining -= count;
