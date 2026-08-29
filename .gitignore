@@ -1,2 +1,6 @@
 *.tar.gz
 build/
+
+.worktrees/
+/target
+/Cargo.lock
