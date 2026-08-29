@@ -2,6 +2,15 @@
 
 Guidance for AI agents working in this repo.
 
+## Always use a git worktree
+
+- Never work directly on the main checkout. Create a dedicated git worktree
+  for every piece of work (see `git worktree` / the existing `.worktrees/`
+  directory).
+- Before starting any session, update the worktree first: `git fetch --all`
+  then `git pull --ff-only` (or rebase) so you're never working from stale
+  state.
+
 ## Project
 
 C11 implementation of the Pekonen 2011 phase-distortion model of the Moog
