@@ -1,5 +1,4 @@
 *.tar.gz
-build/
 
 .worktrees/
 /target
