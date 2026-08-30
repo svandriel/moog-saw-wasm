@@ -2,4 +2,3 @@
 
 .worktrees/
 /target
-/Cargo.lock

@@ -9,6 +9,9 @@ Guidance for AI agents working in this repo.
 - Work happens on a feature branch (in a dedicated worktree), is pushed to
   `origin`, then merged through a PR.
 - Keep PRs small and focused; one logical change per PR.
+- Committing and pushing is not deferred until the work is done: design specs
+  and implementation plans are committed and pushed to `origin` right away, so
+  the branch state on the remote always reflects current progress.
 
 ## Always use a git worktree
 
@@ -54,6 +57,8 @@ future AudioWorklet/npm package. `src/ffi.rs` holds the C-ABI exports.
   arithmetic intentionally changes, regenerate fixtures and commit them
   together.
 - Add behavior as pure Rust plus tests; run `cargo test` after any change.
+- Unslop any text aimed at humans (PR descriptions, READMEs, commit messages):
+  plain words, no em dashes, no AI tells.
 
 ## Key architecture notes
 
