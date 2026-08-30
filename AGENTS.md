@@ -37,7 +37,7 @@ future AudioWorklet/npm package. `src/ffi.rs` holds the C-ABI exports.
 
 - `src/lib.rs` — DSP core (`MoogSaw`, `p`, `waveform`)
 - `src/ffi.rs` — C-ABI exports for future WASM
-- `tests/dsp.rs` — ported numeric tests (parameter fit, progression, fractional
+- `tests/dsp.rs` — numeric tests (parameter fit, progression, fractional
   sync, explicit event)
 - `tests/fixture_parity.rs` — bit-exact parity vs. golden WAV fixtures
 - `tests/wav.rs` — minimal float32 WAV reader helper
@@ -75,8 +75,6 @@ out of scope here.
 
 ## Regenerating fixtures
 
-Golden fixtures were produced by the original C implementation (float32 WAV,
-mono, 48 kHz, 0.25 s, frequencies `{55, 110, 220, 440, 880, 1760, 3520}` Hz)
-before it was deleted. They are the specification by example: if DSP arithmetic
-intentionally changes, regenerate the fixtures from the new implementation and
-commit them with the change.
+Golden fixtures are the specification by example: float32 WAV, mono, 48 kHz,
+0.25 s, frequencies `{55, 110, 220, 440, 880, 1760, 3520}` Hz. If DSP arithmetic
+intentionally changes, regenerate the fixtures and commit them with the change.

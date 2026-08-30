@@ -1,6 +1,6 @@
-# Pekonen Moog Saw: Rust implementation
+# Pekonen Moog Saw
 
-Pure `#![no_std]` Rust implementation of the waveform-based phase-distortion
+A pure `#![no_std]` Rust oscillator using the waveform-based phase-distortion
 model from:
 
 J. Pekonen, V. Lazzarini, J. Timoney, J. Kleimola, and V. Välimäki,
@@ -11,32 +11,30 @@ J. Pekonen, V. Lazzarini, J. Timoney, J. Kleimola, and V. Välimäki,
 ## Building
 
 Rust (stable, edition 2024), zero runtime dependencies.
-(Float math uses the pure-Rust `libm` crate.)
+Float math uses the pure-Rust `libm` crate.
 
 ```sh
 cargo build
 cargo test
 ```
 
-The crate builds as an rlib. The core is `#![no_std]`-clean
-so it can target `wasm32-unknown-unknown` for web/AudioWorklet use. The cdylib
-WASM artifact is produced by a thin wrapper crate in the WASM phase, matching the
-reference pattern for Rust audio worklets (stable `cargo test` is incompatible
-with a `cdylib` + `no_std` crate).
+The core is `#![no_std]`-clean, so it compiles for `wasm32-unknown-unknown`
+for web/AudioWorklet use. The WASM cdylib lives in a thin wrapper crate (stable
+`cargo test` doesn't mix with a `cdylib` + `no_std` crate).
 
 ## API
 
-- `MoogSaw::new(sample_rate) -> Option<MoogSaw>` — create the oscillator
-  (default frequency 440 Hz).
-- `set_frequency(hz)`, `reset(phase)`, `phase()` — control/inspect.
-- `process(frequency, sync, output)` — block renderer. `frequency`/`sync` are
-  optional audio-rate slices; a rising zero crossing of `sync` triggers hard
-  sync, linearly interpolated in time.
-- `process_sample(frequency_hz, sync_event, event_offset_samples) -> f32` —
-  per-sample rendering for oscillators that know the exact master phase-wrap
+- `MoogSaw::new(sample_rate) -> Option<MoogSaw>` creates the oscillator, default
+  440 Hz.
+- `set_frequency(hz)`, `reset(phase)`, and `phase()` control and inspect state.
+- `process(frequency, sync, output)` renders a block. `frequency` and `sync`
+  are optional audio-rate slices; a rising zero crossing of `sync` triggers
+  hard sync, linearly interpolated in time.
+- `process_sample(frequency_hz, sync_event, event_offset_samples) -> f32`
+  renders a single sample for oscillators that know the exact master phase-wrap
   time.
-- `p(frequency_hz)`, `waveform(phase, p)` — the Pekonen linear fit and the
-  phase-distortion waveform.
+- `p(frequency_hz)` and `waveform(phase, p)` expose the Pekonen linear fit and
+  the phase-distortion waveform.
 
 DSP runs in normalized phase units `[0,1)`; output is approximately `[-1,+1]`.
 
@@ -44,11 +42,10 @@ DSP runs in normalized phase units `[0,1)`; output is approximately `[-1,+1]`.
 
 `cargo test` runs:
 
-- numeric tests ported from the original C suite (parameter fit, phase
-  progression, fractional sync, explicit event), and
-- bit-exact parity checks against committed golden WAV fixtures
-  (`tests/fixtures/`, float32 mono 48 kHz, frequencies 55–3520 Hz) generated
-  from the original C implementation.
+- numeric tests for the parameter fit, phase progression, fractional sync, and
+  explicit event, and
+- bit-exact parity checks against golden WAV fixtures (`tests/fixtures/`,
+  float32 mono 48 kHz, frequencies 55–3520 Hz).
 
 ## Scope / limitations
 
