@@ -14,4 +14,4 @@ jobs:
       - run: cargo test
       - run: cargo build --release
       - name: Benchmark (display only)
-        run: cargo bench --bench process -- --quick
+        run: cargo bench -- --quick
