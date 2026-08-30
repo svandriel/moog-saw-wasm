@@ -1,4 +1,6 @@
 use std::fs;
+use std::fs::File;
+use std::io::{Result, Write};
 use std::path::Path;
 
 pub fn read_float32_wav(path: &Path) -> (u32, Vec<f32>) {
@@ -22,4 +24,45 @@ pub fn read_float32_wav(path: &Path) -> (u32, Vec<f32>) {
         samples.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
     }
     (sample_rate, samples)
+}
+
+pub fn write_float32_wav(path: &Path, sample_rate: u32, samples: &[f32]) -> Result<()> {
+    let mut file = File::create(&path)?;
+
+    let channels: u16 = 1;
+    let audio_format: u16 = 3; // IEEE 754 float
+    let bits_per_sample: u16 = 32;
+    let bytes_per_sample: u16 = bits_per_sample / 8; // float is 4 bytes
+    let block_align: u16 = channels * bytes_per_sample;
+    let byte_rate: u32 = sample_rate * block_align as u32;
+    let fmt_chunk_size: u32 = 16;
+    let data_chunk_size = samples.len() as u32 * block_align as u32;
+    let riff_size: u32 = 4 + (8 + fmt_chunk_size) + (8 + data_chunk_size);
+
+    // RIFF header
+    file.write_all(b"RIFF")?;
+    file.write_all(&riff_size.to_le_bytes())?;
+
+    // WAVE chunk
+    file.write_all(b"WAVE")?;
+
+    // fmt chunk
+    file.write_all(b"fmt ")?;
+    file.write_all(&fmt_chunk_size.to_le_bytes())?;
+    file.write_all(&audio_format.to_le_bytes())?;
+    file.write_all(&channels.to_le_bytes())?;
+    file.write_all(&sample_rate.to_le_bytes())?;
+    file.write_all(&byte_rate.to_le_bytes())?;
+    file.write_all(&block_align.to_le_bytes())?;
+    file.write_all(&bits_per_sample.to_le_bytes())?;
+
+    // data chunk
+    file.write_all(b"data")?;
+    file.write_all(&data_chunk_size.to_le_bytes())?;
+
+    for &sample in samples {
+        file.write_all(&sample.to_le_bytes())?;
+    }
+
+    Ok(())
 }
