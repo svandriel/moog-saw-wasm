@@ -57,6 +57,8 @@ future AudioWorklet/npm package. `src/ffi.rs` holds the C-ABI exports.
   arithmetic intentionally changes, regenerate fixtures and commit them
   together.
 - Add behavior as pure Rust plus tests; run `cargo test` after any change.
+- Unslop any text aimed at humans (PR descriptions, READMEs, commit messages):
+  plain words, no em dashes, no AI tells.
 
 ## Key architecture notes
 
