@@ -221,7 +221,7 @@ Replace the display step command:
 
 ```yaml
       - name: Benchmark (display only)
-        run: cargo bench -- --quick
+        run: cargo bench --bench process --bench primitives -- --quick
 ```
 
 - [ ] **Step 2: Review the diff**

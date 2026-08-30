@@ -23,8 +23,10 @@ The first benchmark round exposed two blind spots (see PR #5):
   7-edge variant.
 - Add a `primitives` bench target with `p`, `waveform`, and `process_sample`
   micro-benchmarks, each swept across the seven canonical frequencies.
-- Update the CI display step to run all bench targets (`cargo bench -- --quick`)
-  so the new target is compiled and exercised in CI.
+- Update the CI display step to run all bench targets
+  (`cargo bench --bench process --bench primitives -- --quick`, the bare
+  `cargo bench -- --quick` form fails: the implicit lib bench harness rejects
+  criterion's `--quick`) so the new target is compiled and exercised in CI.
 - Out of scope: baseline tracking, perf gating, exposing private `wrap_phase`,
   const-block-size changes, `process_sample` event-path variants.
 
@@ -58,8 +60,11 @@ private function (notably `wrap_phase`) is exposed for the bench.
 ### CI display step
 
 `.github/workflows/ci.yml`: change the display command from
-`cargo bench --bench process -- --quick` to `cargo bench -- --quick`, so both
-bench targets compile and run. Still display-only, no perf gate, same triggers.
+`cargo bench --bench process -- --quick` to
+`cargo bench --bench process --bench primitives -- --quick`, so both
+bench targets compile and run. (The bare `cargo bench -- --quick` form runs the
+implicit lib bench harness, which rejects criterion's `--quick`.) Still
+display-only, no perf gate, same triggers.
 
 ## Data flow
 
