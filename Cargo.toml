@@ -10,6 +10,10 @@ crate-type = ["rlib"]
 name = "process"
 harness = false
 
+[[bench]]
+name = "primitives"
+harness = false
+
 [dependencies]
 libm = "0.2"
 
