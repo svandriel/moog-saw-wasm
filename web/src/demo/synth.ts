@@ -20,10 +20,10 @@ export class Synth {
   private wave: Wave = "sine";
   private cutoff = 4000;
   private voices: Record<number, Voice> = {};
-  private _octaveLabel = "";
 
   // Guard: set to true while a moog voice is being created for a semi.
   private starting: Record<number, boolean> = {};
+  private _octaveOffset = 0;
 
   get analyserRef(): AnalyserNode | null {
     return this.analyser ?? null;
@@ -33,12 +33,8 @@ export class Synth {
     return this.wave;
   }
 
-  get octaveLabel(): string {
-    return this._octaveLabel;
-  }
-
-  setOctaveLabel(s: string) {
-    this._octaveLabel = s;
+  setOctaveOffset(o: number) {
+    this._octaveOffset = o;
   }
 
   private ensureAudio(): void {
@@ -118,11 +114,6 @@ export class Synth {
       );
   }
 
-  setSub(on: boolean): void {
-    // sub is created per-voice in noteOn; this flag is read there
-    void on;
-  }
-
   private _subOn = false;
   get subOn(): boolean {
     return this._subOn;
@@ -149,7 +140,7 @@ export class Synth {
           node.disconnect();
           return;
         }
-        node.parameters.get("frequency")!.value = freqOf(semi, 0);
+        node.parameters.get("frequency")!.value = freqOf(semi, this._octaveOffset);
 
         const env = ctx.createGain();
         env.gain.setValueAtTime(0.0001, now);
@@ -163,7 +154,7 @@ export class Synth {
         if (this._subOn) {
           sub = ctx.createOscillator();
           sub.type = "sine";
-          sub.frequency.value = freqOf(semi, 0) / 2;
+          sub.frequency.value = freqOf(semi, this._octaveOffset) / 2;
           const subG = ctx.createGain();
           subG.gain.value = 0.5;
           sub.connect(subG);
@@ -190,7 +181,7 @@ export class Synth {
       // Native oscillator voice
       const osc = ctx.createOscillator();
       osc.type = this.wave;
-      osc.frequency.value = freqOf(semi, 0);
+      osc.frequency.value = freqOf(semi, this._octaveOffset);
 
       const env = ctx.createGain();
       env.gain.setValueAtTime(0.0001, now);
@@ -205,7 +196,7 @@ export class Synth {
       if (this._subOn) {
         sub = ctx.createOscillator();
         sub.type = "sine";
-        sub.frequency.value = freqOf(semi, 0) / 2;
+        sub.frequency.value = freqOf(semi, this._octaveOffset) / 2;
         const subG = ctx.createGain();
         subG.gain.value = 0.5;
         sub.connect(subG);

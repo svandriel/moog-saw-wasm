@@ -18,6 +18,7 @@ const wavesEl = document.getElementById("waves") as HTMLElement;
 const kb = buildKeyboard(
   kbEl,
   (semi) => {
+    synth.setOctaveOffset(kb.octave() - 4);
     synth.noteOn(semi);
     ensureAudioOnce();
   },
