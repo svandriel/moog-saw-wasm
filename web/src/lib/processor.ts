@@ -28,8 +28,8 @@ class MoogSawProcessor extends AudioWorkletProcessor {
     };
   }
 
-  private async init(data: { module: WebAssembly.Module; sampleRate: number }) {
-    const instance = await WebAssembly.instantiate(data.module);
+  private async init(data: { bytes: ArrayBuffer; sampleRate: number }) {
+    const { instance } = await WebAssembly.instantiate(data.bytes);
     this.exports = instance.exports;
     this.memory = instance.exports.memory as unknown as WebAssembly.Memory;
     this.oscPtr = this.exports.moog_saw_create(data.sampleRate);

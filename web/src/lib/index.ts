@@ -13,7 +13,7 @@ function ensureProcessorModule(ctx: AudioContext): Promise<void> {
 export async function createMoogSawNode(
   ctx: AudioContext,
 ): Promise<AudioWorkletNode> {
-  const wasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
+  const wasmBytes = await (await fetch(wasmUrl)).arrayBuffer();
   await ensureProcessorModule(ctx);
 
   const node = new AudioWorkletNode(ctx, "moog-saw", {
@@ -24,7 +24,7 @@ export async function createMoogSawNode(
 
   node.port.postMessage({
     type: "init",
-    module: wasmModule,
+    bytes: wasmBytes,
     sampleRate: ctx.sampleRate,
   });
 
