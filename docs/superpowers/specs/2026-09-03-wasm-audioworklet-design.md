@@ -3,41 +3,64 @@
 ## Goal
 
 Package the Moog Saw oscillator as an NPM package that ships a ready-made
-`AudioWorkletProcessor`. Users install the package, call one helper function,
-and get a connected audio node.
+`AudioWorkletProcessor`. Provide a proper browser development environment:
+a Vite + pnpm app with an adapted synth demo page (based on the Fable
+"032-synth-wave-visualizer" template) that plays the moog saw, plus `pnpm run
+dev`.
 
 ## Decisions
 
-- **Workspace layout**: Cargo workspace with two member crates.
-- **WASM crate**: Plain cdylib with C-ABI exports (no wasm-bindgen). The
-  existing FFI functions in `moog_saw::ffi` are re-exported.
-- **AudioWorklet loading**: Main thread compiles WASM with
+- **Rust workspace** at repo root with two member crates: `moog_saw` (core),
+  `moog_saw_wasm` (WASM cdylib).
+- **WASM crate**: plain cdylib with C-ABI exports (no wasm-bindgen). Re-exports
+  `moog_saw::ffi`. Exposes `malloc`/`free`.
+- **AudioWorklet loading**: main thread compiles WASM with
   `WebAssembly.compileStreaming`, passes the `WebAssembly.Module` to the
-  processor via `postMessage`. Processor instantiates the module directly.
-- **NPM package**: WASM binary + AudioWorkletProcessor JS + main-thread helper.
+  processor via `postMessage`. The processor instantiates the module directly
+  with `WebAssembly.instantiate`. No wasm-bindgen glue in the AudioWorklet
+  scope.
+- **JS app** lives under `web/`: Vite + pnpm + TypeScript. Contains the
+  publishable library and the demo.
+- **Package manager**: pnpm. **Build tool**: Vite.
+- **Dev loop**: `pnpm run dev` serves the demo page. Rust -> WASM rebuild via
+  `cargo watch`; TS/CSS via Vite HMR.
 - **AudioWorklet API**: frequency AudioParam + sync audio input.
+- **Demo**: full template adaptation. Saw uses the moog saw; sine/square/tri
+  stay native. Polyphonic, one AudioWorkletNode (and WASM instance) per note.
 
-## Workspace structure
+## Repo layout
 
 ```
 moogsaw/
-  Cargo.toml              # workspace root
-  moog_saw/               # core lib (existing code, moved here)
+  Cargo.toml            # Rust workspace
+  moog_saw/             # core Rust lib (existing code)
     Cargo.toml
     src/lib.rs
     src/ffi.rs
     tests/
-  moog_saw_wasm/          # WASM cdylib (C-ABI exports)
+  moog_saw_wasm/        # WASM cdylib
     Cargo.toml
     src/lib.rs
-  js/
-    processor.js          # AudioWorkletProcessor
-    index.js              # main-thread helper
-  pkg/                    # build output (gitignored)
-  package.json            # NPM package manifest
+  web/
+    package.json
+    pnpm-lock.yaml
+    tsconfig.json
+    vite.config.ts
+    index.html          # adapted demo template
+    src/
+      lib/              # publishable library
+        index.ts        # main-thread helper createMoogSawNode
+        processor.ts    # AudioWorkletProcessor
+        moog-saw.wasm   # built from moog_saw_wasm (gitignored)
+      demo/
+        main.ts
+        style.css
+        scope.ts        # oscilloscope + spectrum rendering
+        keyboard.ts
+        synth.ts        # audio graph, voices, per-note nodes
 ```
 
-Root `Cargo.toml` becomes:
+Root `Cargo.toml`:
 
 ```toml
 [workspace]
@@ -63,183 +86,206 @@ moog_saw = { path = "../moog_saw" }
 
 ### Rust API (`moog_saw_wasm/src/lib.rs`)
 
-The WASM crate re-exports the C-ABI functions from `moog_saw::ffi` and
-provides a `malloc` for the JS side to allocate WASM memory:
+Re-exports the C-ABI functions and provides a global allocator plus
+`malloc`/`free` for JS-side memory management:
 
 ```rust
 #![no_std]
 extern crate alloc;
 
-// Provide a global allocator for wasm32-unknown-unknown
-// (the ffi module needs Box/alloc)
-mod allocator {
-    // wee_alloc or dlmalloc for WASM
-}
+// Global allocator for wasm32-unknown-unknown (ffi.rs needs Box/alloc)
+mod allocator { ... }
 
 // Re-export all C-ABI functions from the core FFI
 pub use moog_saw::ffi::*;
 
-// Expose malloc for JS-side memory allocation in the AudioWorkletProcessor
 #[unsafe(no_mangle)]
-pub extern "C" fn malloc(size: usize) -> *mut u8 {
-    let layout = core::alloc::Layout::from_size_align(size, 8).unwrap();
-    unsafe { alloc::alloc(layout) }
-}
+pub extern "C" fn malloc(size: usize) -> *mut u8 { ... }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn free(ptr: *mut u8, size: usize) {
-    let layout = core::alloc::Layout::from_size_align(size, 8).unwrap();
-    unsafe { alloc::dealloc(ptr, layout) }
-}
+pub extern "C" fn free(ptr: *mut u8, size: usize) { ... }
 ```
 
-The core FFI already exports:
-- `moog_saw_create(sample_rate: f64) -> *mut MoogSaw`
-- `moog_saw_destroy(osc: *mut MoogSaw)`
-- `moog_saw_reset(osc: *mut MoogSaw, phase: f64)`
-- `moog_saw_set_frequency(osc: *mut MoogSaw, frequency_hz: f32)`
-- `moog_saw_process(osc, frequency, sync, output, frames)`
-- `moog_saw_process_sample(osc, frequency_hz, sync_event, event_offset, output)`
+The core `moog_saw::ffi` already exports `moog_saw_create`, `moog_saw_destroy`,
+`moog_saw_reset`, `moog_saw_set_frequency`, `moog_saw_process`,
+`moog_saw_process_sample`, `moog_saw_p`, `moog_saw_waveform`.
 
-No wasm-bindgen. No wasm-pack. The WASM binary is built with:
+Build:
 ```
 cargo build --target wasm32-unknown-unknown -p moog_saw_wasm --release
 ```
 
-## AudioWorkletProcessor (`js/processor.js`)
+## JS app under `web/`
 
-Runs in the AudioWorklet global scope. Receives a compiled `WebAssembly.Module`
-via `postMessage` from the main thread, instantiates it in the constructor,
-and renders audio in `process()`.
+### package.json (pnpm)
 
-The processor uses raw C-ABI WASM exports and manages WASM linear memory
-directly:
+```json
+{
+  "name": "moog-saw",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "wasm:build": "cargo build --target wasm32-unknown-unknown -p moog_saw_wasm --release && cp ../../target/wasm32-unknown-unknown/release/moog_saw_wasm.wasm src/lib/moog-saw.wasm",
+    "wasm:watch": "cargo watch -x \"build --target wasm32-unknown-unknown -p moog_saw_wasm --release\" -s \"cp ../../target/wasm32-unknown-unknown/release/moog_saw_wasm.wasm src/lib/moog-saw.wasm\"",
+    "dev": "run-p wasm:watch vite",
+    "vite": "vite",
+    "build": "run-s wasm:build tsc vite:build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5",
+    "typescript": "~5.6",
+    "vite": "^6",
+    "cargo-watch": "^8"
+  }
+}
+```
 
-```js
+Notes:
+- `cargo-watch` as a devDependency is a placeholder; it is normally a cargo
+  binary (`cargo install cargo-watch`). The plan must pick a concrete watcher
+  (cargo watch binary, or a node-side chokidar wrapper). The convention of
+  `run-p` (parallel) and `run-s` (sequential) comes from `npm-run-all`, per the
+  article.
+- `moog-saw.wasm` is gitignored (built artifact).
+
+### vite.config.ts
+
+Raw C-ABI wasm is imported with Vite's `?url` suffix, so no special wasm
+plugin is required:
+
+```ts
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  // wasm loaded via ?url; demo served from index.html
+});
+```
+
+### AudioWorkletProcessor (`src/lib/processor.ts`)
+
+```ts
 class MoogSawProcessor extends AudioWorkletProcessor {
-    static get parameterDescriptors() {
-        return [
-            { name: 'frequency', defaultValue: 440, minValue: 20, maxValue: 20000, automationRate: 'a-rate' },
-        ];
+  static get parameterDescriptors() {
+    return [{
+      name: 'frequency',
+      defaultValue: 440,
+      minValue: 20,
+      maxValue: 20000,
+      automationRate: 'a-rate',
+    }];
+  }
+
+  constructor() {
+    super();
+    this.exports = null;
+    this.memory = null;
+    this.oscPtr = 0;
+    this.freqBufPtr = 0;
+    this.syncBufPtr = 0;
+    this.outBufPtr = 0;
+    this.ready = false;
+
+    this.port.onmessage = (e) => {
+      if (e.data.type === 'init') this.init(e.data);
+    };
+  }
+
+  async init({ module, sampleRate }) {
+    const { instance } = await WebAssembly.instantiate(module);
+    this.exports = instance.exports;
+    this.memory = instance.exports.memory;
+    this.oscPtr = this.exports.moog_saw_create(sampleRate);
+
+    const bufSize = 128 * 4;
+    this.freqBufPtr = this.exports.malloc(bufSize);
+    this.syncBufPtr = this.exports.malloc(bufSize);
+    this.outBufPtr = this.exports.malloc(bufSize);
+    this.ready = true;
+  }
+
+  process(inputs, outputs, params) {
+    if (!this.ready) return true;
+
+    const out = outputs[0][0];
+    const freqParam = params.frequency;
+    const syncInput = inputs[0]?.[0];
+
+    const freqView = new Float32Array(this.memory.buffer, this.freqBufPtr, 128);
+    if (freqParam.length === 1) freqView.fill(freqParam[0]);
+    else freqView.set(freqParam.subarray(0, 128));
+
+    if (syncInput) {
+      const syncView = new Float32Array(this.memory.buffer, this.syncBufPtr, 128);
+      syncView.set(syncInput.subarray(0, 128));
     }
 
-    constructor() {
-        super();
-        this.exports = null;
-        this.memory = null;
-        this.oscPtr = 0;
-        this.freqBufPtr = 0;
-        this.syncBufPtr = 0;
-        this.outBufPtr = 0;
-        this.ready = false;
+    this.exports.moog_saw_process(
+      this.oscPtr,
+      this.freqBufPtr,
+      syncInput ? this.syncBufPtr : 0,
+      this.outBufPtr,
+      128,
+    );
 
-        this.port.onmessage = (e) => {
-            if (e.data.type === 'init') {
-                this.init(e.data);
-            }
-        };
-    }
+    const wasmOut = new Float32Array(this.memory.buffer, this.outBufPtr, 128);
+    out.set(wasmOut);
 
-    async init({ module, sampleRate }) {
-        const { instance } = await WebAssembly.instantiate(module);
-        this.exports = instance.exports;
-        this.memory = instance.exports.memory;
-
-        this.oscPtr = this.exports.moog_saw_create(sampleRate);
-
-        // Allocate buffers (128 frames = render quantum)
-        const bufSize = 128 * 4;
-        this.freqBufPtr = this.exports.malloc(bufSize);
-        this.syncBufPtr = this.exports.malloc(bufSize);
-        this.outBufPtr = this.exports.malloc(bufSize);
-
-        this.ready = true;
-    }
-
-    process(inputs, outputs, params) {
-        if (!this.ready) return true;
-
-        const out = outputs[0][0];
-        const freqParam = params.frequency;
-        const syncInput = inputs[0]?.[0];
-
-        // Always write frequency to WASM memory (handles both a-rate and k-rate)
-        const freqView = new Float32Array(this.memory.buffer, this.freqBufPtr, 128);
-        if (freqParam.length === 1) {
-            freqView.fill(freqParam[0]);
-        } else {
-            freqView.set(freqParam.subarray(0, 128));
-        }
-
-        // Write sync input to WASM memory
-        if (syncInput) {
-            const syncView = new Float32Array(this.memory.buffer, this.syncBufPtr, 128);
-            syncView.set(syncInput.subarray(0, 128));
-        }
-
-        // Call moog_saw_process
-        this.exports.moog_saw_process(
-            this.oscPtr,
-            this.freqBufPtr,
-            syncInput ? this.syncBufPtr : 0,
-            this.outBufPtr,
-            128,
-        );
-
-        // Read output from WASM memory
-        const wasmOut = new Float32Array(this.memory.buffer, this.outBufPtr, 128);
-        out.set(wasmOut);
-
-        return true; // keep alive
-    }
+    return true;
+  }
 }
 
 registerProcessor('moog-saw', MoogSawProcessor);
 ```
 
 Key details:
+- **frequency**: AudioParam, `a-rate`, default 440. Copied to WASM memory per
+  block.
+- **sync**: `inputs[0][0]` copied to WASM memory; null pointer if disconnected.
+- **rendering**: `moog_saw_process` full 128-frame blocks. Block-level sync
+  detection in core DSP handles sync events.
+- **memory**: buffers allocated once in `init()`, reused per block.
+- **init timing**: `init()` is async; `process()` returns `true` until init
+  completes.
 
-- **frequency**: AudioParam declared with `defaultValue: 440`, `automationRate: 'a-rate'`. Always copied to WASM memory (handles both a-rate and k-rate uniformly).
-- **sync**: Audio input. `inputs[0][0]` copied to WASM memory. Null pointer passed if no input connected.
-- **rendering**: Uses `moog_saw_process()` for full 128-frame blocks. The existing block-level sync detection in the core DSP handles sync events.
-- **memory**: All buffers are allocated once in `init()` and reused per block.
-- **init timing**: `init()` is async (WASM instantiation). `process()` returns `true` (keep alive) until init completes, then processes normally.
+### Main-thread helper (`src/lib/index.ts`)
 
-## Main-thread helper (`js/index.js`)
+```ts
+import wasmUrl from './moog-saw.wasm?url';
 
-Handles WASM compilation, processor registration, and node creation:
+export async function createMoogSawNode(ctx: AudioContext): Promise<AudioWorkletNode> {
+  const wasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
+  const processorUrl = new URL('./processor.ts', import.meta.url);
+  await ctx.audioWorklet.addModule(processorUrl);
 
-```js
-export async function createMoogSawNode(audioContext) {
-    // 1. Fetch and compile WASM module
-    const wasmUrl = new URL('./moog_saw_wasm_bg.wasm', import.meta.url);
-    const wasmModule = await WebAssembly.compileStreaming(fetch(wasmUrl));
+  const node = new AudioWorkletNode(ctx, 'moog-saw', {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+  });
 
-    // 2. Register processor
-    const processorUrl = new URL('./processor.js', import.meta.url);
-    await audioContext.audioWorklet.addModule(processorUrl);
+  node.port.postMessage({
+    type: 'init',
+    module: wasmModule,
+    sampleRate: ctx.sampleRate,
+  });
 
-    // 3. Create AudioWorkletNode
-    const node = new AudioWorkletNode(audioContext, 'moog-saw', {
-        numberOfInputs: 1,   // sync
-        numberOfOutputs: 1,
-        outputChannelCount: [1],
-    });
-
-    // 4. Send compiled module to processor
-    node.port.postMessage({
-        type: 'init',
-        module: wasmModule,
-        sampleRate: audioContext.sampleRate,
-    });
-
-    return node;
+  return node;
 }
 ```
 
+**Vite/AudioWorklet integration note**: `audioWorklet.addModule()` must load a
+standalone module, not the main bundle. In Vite this is done by importing the
+processor as a separate module (`new URL('./processor.ts', import.meta.url)`)
+so Vite emits it as its own chunk. The plan must verify this specific Vite
+behaviour and use the correct mechanism (a separate entry, `import.meta.url`
+chunk, or a small build plugin). This is a known integration point that needs
+verification during implementation.
+
 ### User-facing API
 
-```js
+```ts
 import { createMoogSawNode } from 'moog-saw';
 
 const ctx = new AudioContext();
@@ -248,19 +294,37 @@ osc.parameters.get('frequency').value = 440;
 osc.connect(ctx.destination);
 ```
 
-## NPM package structure
+## Demo (adapted template)
 
-What ships in the NPM package:
+The template `032-synth-wave-visualizer.html` is ported into Vite as
+`web/index.html` + `src/demo/*`. Its synth JS is split into modules:
+`synth.ts` (audio graph, voices), `keyboard.ts`, `scope.ts` (oscilloscope +
+spectrum).
 
-```
-pkg/
-  package.json            # name: "moog-saw"
-  moog_saw_wasm_bg.wasm   # WASM binary (cargo build output)
-  index.js                # main entry (createMoogSawNode)
-  processor.js            # AudioWorkletProcessor
-```
+Adaptations for the moog saw:
 
-`package.json`:
+- **Waveform selector**: the Saw button uses the moog saw. Sine, Square, and
+  Triangle keep native `osc.type`. When Saw is selected, `noteOn` uses the
+  moog saw; otherwise native oscillators.
+- **Polyphony**: `noteOn(semi)` creates one AudioWorkletNode (plus its WASM
+  instance) per active note, cached in `voices[semi]`. All nodes compile/share
+  the same `WebAssembly.Module`; each instantiates its own instance.
+- **Signal chain**: moog saw node -> shared per-note envelope gain -> shared
+  filter (lowpass) -> delay -> analyser. Same as the template's existing chain,
+  with the oscillator replaced.
+- **noteOff**: release the envelope, schedule node teardown, and free the WASM
+  instance (via a `destroy` message handled by the processor `destructor()`).
+- **Sub oscillator, filter knob, delay toggles, oscilloscope, spectrum**:
+  unchanged from the template.
+
+The demo is the development/test environment and also serves as a usage
+example. It is not part of the published NPM artifact (the library is).
+
+## NPM package (publishable artifact)
+
+The library to publish is `src/lib/*` plus the wasm. `web/package.json` is
+`private: true` for now; a separate publishable package.json (or a pre-publish
+step) produces the artifact with:
 
 ```json
 {
@@ -268,33 +332,42 @@ pkg/
   "version": "0.1.0",
   "type": "module",
   "main": "index.js",
-  "files": ["*.js", "*.wasm"]
+  "types": "index.d.ts",
+  "files": ["index.js", "processor.js", "moog-saw.wasm"]
 }
 ```
 
-## Build pipeline
+The exact publish flow (dist build, package entrypoints, types emission) is
+finalised in the implementation plan. The primary deliverable of this spec is
+the working library + dev environment; publishing is secondary.
 
-1. `cargo build --target wasm32-unknown-unknown -p moog_saw_wasm --release`
-2. Copy `target/wasm32-unknown-unknown/release/moog_saw_wasm.wasm`
-   to `pkg/moog_saw_wasm_bg.wasm`
-3. Copy `js/processor.js` and `js/index.js` into `pkg/`
-4. `npm publish` from `pkg/`
+## Build/dev pipeline
 
-A build script or Makefile orchestrates steps 1-3.
+- `pnpm install` in `web/`
+- `pnpm run dev`: parallel `wasm:watch` (rebuilds Rust -> wasm on change) and
+  `vite` (HMR for TS/CSS). Open the served demo page.
+- `pnpm run build`: sequential `wasm:build`, `tsc`, `vite build`.
+- `pnpm run preview`: serve the built demo.
 
 ## Testing strategy
 
-- **Rust tests**: Existing `moog_saw` tests continue to run unchanged via
-  `cargo test`. The WASM crate gets a basic build-time check (it compiles).
-- **WASM build check**: CI runs `cargo build --target wasm32-unknown-unknown`
-  to verify the WASM crate compiles.
-- **Manual/integration**: A small HTML demo page that loads the NPM package
-  and plays the oscillator. Not automated, but committed as a reference.
+- **Rust tests**: existing `moog_saw` tests keep running via `cargo test` from
+  the workspace root. Acts as the DSP correctness reference.
+- **WASM build check**: ensure `cargo build --target wasm32-unknown-unknown -p
+  moog_saw_wasm` compiles (local + CI).
+- **wasm/JS integration**: the demo page exercises the full path (compile ->
+  process -> register processor -> play). Manual validation in the browser.
+- **CI**: builds both Rust (native test) and the wasm target; runs `pnpm
+  install` + `pnpm run build` in `web/` so the TS/processor code is typechecked
+  and bundles.
 
 ## Scope / limitations
 
 - No anti-aliasing (BLEP/BLAMP). Out of scope for this crate.
-- No pitch modulation beyond the frequency AudioParam.
-- No waveform selection (saw only).
-- The processor is mono. Stereo would require two instances.
+- No pitch modulation beyond the frequency AudioParam (a-rate supported).
+- No waveform selection inside the processor; the core is saw-only. The demo
+  keeps sine/square/tri as native oscillators.
+- The processor is mono; the demo is polyphonic via one node per note.
 - AudioWorklet support required (all modern browsers).
+- Vite's `audioWorklet.addModule` handling of a separate processor chunk must
+  be verified during implementation.
