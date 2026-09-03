@@ -23,6 +23,9 @@ export class Synth {
 
   // Guard: set to true while a moog voice is being created for a semi.
   private starting: Record<number, boolean> = {};
+  // Generation token per semi so a stale in-flight compile for a released note
+  // can be told apart from a newer noteOn for the same semi.
+  private gen: Record<number, number> = {};
   private _octaveOffset = 0;
 
   get analyserRef(): AnalyserNode | null {
@@ -35,6 +38,12 @@ export class Synth {
 
   setOctaveOffset(o: number) {
     this._octaveOffset = o;
+  }
+
+  // Public unlock: creates the AudioContext + graph so a first-gesture click
+  // (without any key press) brings audio live, matching the template.
+  unlock(): void {
+    this.ensureAudio();
   }
 
   private ensureAudio(): void {
@@ -128,6 +137,7 @@ export class Synth {
     if (!this.ctx) return;
 
     this.starting[semi] = true;
+    const token = (this.gen[semi] = (this.gen[semi] ?? 0) + 1);
     const ctx = this.ctx;
     const now = ctx.currentTime;
 
@@ -135,8 +145,9 @@ export class Synth {
       // Moog saw voice: async AudioWorkletNode creation
       try {
         const node = await createMoogSawNode(ctx);
-        // Check if voice was removed while we were async-starting
-        if (!this.starting[semi]) {
+        // Abandon if the key was released mid-compile (starting cleared) or a
+        // newer noteOn for the same semi took over (token changed).
+        if (!this.starting[semi] || this.gen[semi] !== token) {
           node.disconnect();
           return;
         }
@@ -175,7 +186,10 @@ export class Synth {
         };
         this.voices[semi] = voice;
       } catch {
-        // If worklet creation fails, remove the starting guard
+        // Worklet creation failed; no voice was added, so the finally block
+        // clearing the starting guard is the only cleanup needed.
+      } finally {
+        this.starting[semi] = false;
       }
     } else {
       // Native oscillator voice
@@ -215,12 +229,15 @@ export class Synth {
           }
         },
       };
+      this.starting[semi] = false;
     }
-
-    this.starting[semi] = false;
   }
 
   noteOff(semi: number): void {
+    // Clear the starting guard even when the voice has not been created yet, so
+    // a compile in flight for a released note is abandoned on arrival.
+    if (this.starting[semi]) this.starting[semi] = false;
+
     const v = this.voices[semi];
     if (!v) return;
     delete this.voices[semi];

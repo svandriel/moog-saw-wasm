@@ -144,8 +144,7 @@ let audioUnlocked = false;
 function ensureAudioOnce() {
   if (audioUnlocked) return;
   audioUnlocked = true;
-  // Trigger synth's internal ensureAudio via a harmless setCutoff call
-  synth.setCutoff(cutoff);
+  synth.unlock();
 }
 
 document.addEventListener("pointerdown", () => ensureAudioOnce(), {
