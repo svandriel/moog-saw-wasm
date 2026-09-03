@@ -11,6 +11,7 @@
     "build": "run-s wasm:build tsc vite:build",
     "tsc": "tsc --noEmit",
     "vite:build": "vite build",
+    "lib": "node scripts/build-lib.mjs",
     "preview": "vite preview"
   },
   "devDependencies": {

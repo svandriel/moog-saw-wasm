@@ -4,4 +4,6 @@
 /target
 /web/node_modules
 /web/dist
+/web/dist-lib
+/web/dist-lib-tsc
 web/src/lib/moog-saw.wasm
