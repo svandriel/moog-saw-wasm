@@ -2,3 +2,6 @@
 
 .worktrees/
 /target
+/web/node_modules
+/web/dist
+web/src/lib/moog-saw.wasm

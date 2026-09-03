@@ -148,4 +148,4 @@ impl MoogSaw {
     }
 }
 
-mod ffi;
+pub mod ffi;

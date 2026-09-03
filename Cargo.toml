@@ -1,21 +1,9 @@
-[package]
-name = "moog_saw"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["moog_saw", "moog_saw_wasm"]
+resolver = "3"
 
-[lib]
-crate-type = ["rlib"]
+[profile.dev]
+panic = "abort"
 
-[[bench]]
-name = "process"
-harness = false
-
-[[bench]]
-name = "primitives"
-harness = false
-
-[dependencies]
-libm = "0.2"
-
-[dev-dependencies]
-criterion = "0.5"
+[profile.release]
+panic = "abort"
