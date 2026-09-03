@@ -4,7 +4,7 @@
 
 **Goal:** Ship the Moog Saw oscillator as a WASM cdylib exposing C-ABI functions, wrapped by an AudioWorkletProcessor and a main-thread helper, delivered as a pnpm + Vite TypeScript app under `web/` with a playable demo (adapted from the Fable synth template) served by `pnpm run dev`.
 
-**Architecture:** Convert the repo into a Cargo workspace with two crates: `moog_saw` (existing core) and `moog_saw_wasm` (a `cdylib` re-exporting the core's C-ABI FFI plus a global allocator and `malloc`/`free`). The browser side lives in `web/`: a Vite + pnpm + TypeScript app whose `src/lib/` holds the publishable library (a `createMoogSawNode` helper and an `AudioWorkletProcessor` that instantiates the raw WASM module) and whose `src/demo/` holds the adapted synth template that drives per-note moog saw voices. The dev loop runs `cargo build --target wasm32-unknown-unknown` (wired to `cargo watch`) in parallel with the Vite dev server.
+**Architecture:** Convert the repo into a Cargo workspace with two crates: `moog_saw` (existing core) and `moog_saw_wasm` (a `cdylib` re-exporting the core's C-ABI FFI plus a global allocator and a single `moog_saw_alloc` JS-callable primitive for reserving fixed per-instance buffers). The browser side lives in `web/`: a Vite + pnpm + TypeScript app whose `src/lib/` holds the publishable library (a `createMoogSawNode` helper and an `AudioWorkletProcessor` that instantiates the raw WASM module and reuses fixed freq/sync/out buffers every block) and whose `src/demo/` holds the adapted synth template that drives per-note moog saw voices. The dev loop runs `cargo build --target wasm32-unknown-unknown` (wired to `cargo watch`) in parallel with the Vite dev server.
 
 **Tech Stack:** Rust (edition 2024, `no_std`, `libm`), C-ABI WASM (`wasm32-unknown-unknown` `cdylib`), Web Audio `AudioWorkletProcessor`/`AudioWorkletNode`, pnpm, Vite, TypeScript, `npm-run-all`.
 
@@ -59,10 +59,17 @@ git mv src moog_saw/src
 git mv tests moog_saw/tests
 git mv benches moog_saw/benches
 git mv Cargo.toml moog_saw/Cargo.toml
-git mv Cargo.lock moog_saw/Cargo.lock
 ```
 
-Verify `moog_saw/src/lib.rs`, `moog_saw/tests/`, `moog_saw/benches/` now exist and the old root `src/` is gone.
+Leave `Cargo.lock` at the repo root: in a Cargo workspace the lockfile belongs at
+the workspace root only. Do NOT move it into `moog_saw/` (a nested
+`moog_saw/Cargo.lock` in a member crate is ignored by Cargo and becomes dead
+committed cruft). The Step 8 `cargo build` then regenerates the root
+`Cargo.lock` as the single authoritative workspace lockfile, including both
+crates.
+
+Verify `moog_saw/src/lib.rs`, `moog_saw/tests/`, `moog_saw/benches/` now exist
+and the old root `src/` is gone.
 
 - [ ] **Step 3: Write the workspace root `Cargo.toml`**
 
@@ -73,11 +80,22 @@ Replace the old root manifest (now moved to `moog_saw/`) with a workspace root:
 members = ["moog_saw", "moog_saw_wasm"]
 resolver = "3"
 
+[profile.dev]
+panic = "abort"
+
 [profile.release]
 panic = "abort"
 ```
 
-Note: the `[profile.release] panic = "abort"` at workspace level is required so the `moog_saw_wasm` cdylib links for `wasm32-unknown-unknown` without pulling in panic machinery. It applies to both crates, which is acceptable.
+Notes:
+- `panic = "abort"` is required in BOTH the dev and release profiles. The
+  `moog_saw_wasm` cdylib is `#![no_std]`; building it for the native target in
+  the dev profile without `panic = "abort"` fails with "unwinding panics are
+  not supported without std". The release profile needs it so the cdylib links
+  for `wasm32-unknown-unknown` without pulling in panic machinery. Both apply
+  to both crates, which is acceptable.
+- `cargo test` still runs the moog_saw tests: the test harness overrides the
+  profile panic strategy and uses unwind, so tests work normally.
 
 - [ ] **Step 4: Update the core crate manifest (keep it intact besides name/paths)**
 
@@ -142,15 +160,23 @@ moog_saw = { path = "../moog_saw" }
 
 - [ ] **Step 7: Write a minimal placeholder `moog_saw_wasm/src/lib.rs`**
 
-Create `moog_saw_wasm/src/lib.rs` with a stub so the crate compiles before the real implementation in Task 2:
+Create `moog_saw_wasm/src/lib.rs` with a stub so the crate compiles before the real implementation in Task 2. A `#![no_std]` cdylib needs a `#[panic_handler]`, but that handler must be `#[cfg(not(test))]` so `cargo test` (which links std) does not hit a duplicate lang item:
 
 ```rust
 #![no_std]
+
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
 
 pub fn placeholder() -> u32 {
     0
 }
 ```
+
+Do not expose `malloc`/`free` or `moog_saw_alloc` here; those land in Task 2.
 
 - [ ] **Step 8: Verify the native workspace builds**
 
@@ -199,7 +225,7 @@ Verify `git status` is clean and `cargo test` still green before moving on.
 
 **Interfaces:**
 - Consumes: `pub mod ffi` from Task 1 (exports `moog_saw_create`, `moog_saw_destroy`, `moog_saw_reset`, `moog_saw_set_frequency`, `moog_saw_process`, `moog_saw_process_sample`, `moog_saw_p`, `moog_saw_waveform`, `moog_saw_phase`).
-- Produces: WASM exported functions `malloc(size: usize) -> *mut u8`, `free(ptr: *mut u8, size: usize)`, plus all `moog_saw_*` re-exports. Used by Task 4's `processor.ts` and validated in Task 5.
+- Produces: WASM exported functions `moog_saw_alloc(size: usize) -> *mut u8` (the single JS-callable allocation primitive; NO `malloc`/`free`), plus all `moog_saw_*` re-exports and `memory`. Used by Task 4's `processor.ts` and validated in Task 5.
 - Consumes: nothing else.
 
 - [ ] **Step 1: Write the failing compile check**
@@ -214,24 +240,33 @@ Replace the placeholder with:
 #![no_std]
 extern crate alloc;
 
+#[cfg(not(test))]
 use alloc::alloc::{alloc, dealloc};
+#[cfg(not(test))]
 use core::alloc::{GlobalAlloc, Layout};
+#[cfg(not(test))]
 use core::panic::PanicInfo;
 
 // The core ffi uses Box (alloc) to manage MoogSaw lifetimes over the C-ABI.
 // wasm32-unknown-unknown has no default global allocator, so a cdylib that
 // allocates must provide one. A simple bump allocator over a static heap
 // suffices: every moog_saw_create returns a pointer that lives until
-// moog_saw_destroy (or process teardown), and the js-side malloc/free build
-// per-block buffers.
+// moog_saw_destroy (or process teardown), and the js-side moog_saw_alloc
+// reserves the fixed per-instance input/output buffers once at init.
 
+#[cfg(not(test))]
 struct WasmAllocator;
 
+#[cfg(not(test))]
 const HEAP_SIZE: usize = 1 << 20; // 1 MiB static heap
 
+#[cfg(not(test))]
 static mut HEAP: [u8; HEAP_SIZE] = [0u8; HEAP_SIZE];
+
+#[cfg(not(test))]
 static mut OFFSET: usize = 0;
 
+#[cfg(not(test))]
 unsafe impl GlobalAlloc for WasmAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let align = layout.align();
@@ -252,9 +287,11 @@ unsafe impl GlobalAlloc for WasmAllocator {
     }
 }
 
+#[cfg(not(test))]
 #[global_allocator]
 static ALLOC: WasmAllocator = WasmAllocator;
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
@@ -263,23 +300,22 @@ fn panic(_info: &PanicInfo) -> ! {
 // Re-export every C-ABI function from the core crate's public ffi module.
 pub use moog_saw::ffi::*;
 
-// Explicit JS-callable memory primitives.
+// The single JS-callable allocation primitive. Used once at processor init to
+// reserve the fixed freq/sync/output buffers. There is intentionally NO
+// malloc/free/dealloc exposed: buffers live for the life of the instance.
+#[cfg(not(test))]
 #[unsafe(no_mangle)]
-pub extern "C" fn malloc(size: usize) -> *mut u8 {
+pub extern "C" fn moog_saw_alloc(size: usize) -> *mut u8 {
     let layout = Layout::from_size_align(size, 8).unwrap();
     unsafe { alloc(layout) }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn free(ptr: *mut u8, size: usize) {
-    let layout = Layout::from_size_align(size, 8).unwrap();
-    unsafe { dealloc(ptr, layout) }
 }
 ```
 
 Notes:
+- `#[cfg(not(test))]` gates the allocator, the panic handler, and `moog_saw_alloc` so that `cargo test` from the workspace root (which links std) compiles the wasm crate cleanly. Without the gate on the panic handler, `cargo test` fails with "multiple lang items"; without the gate on `moog_saw_alloc`, its call into `alloc::alloc::alloc` has no global allocator under the test harness. The wasm release build is a non-test build, so everything is included there.
 - Use `core::ptr::addr_of_mut!(HEAP)` rather than `HEAP.as_mut_ptr()`; edition 2024 denies `static_mut_refs` and the former compiles cleanly.
 - `panic = "abort"` (set at the workspace root in Task 1) plus this `#[panic_handler]` satisfies the linker for `wasm32-unknown-unknown`.
+- No `malloc`, `free`, or `dealloc` symbols are exported.
 
 - [ ] **Step 3: Build for wasm32 and verify it compiles**
 
@@ -302,8 +338,8 @@ const e = instance.exports;
 console.log("exports:", Object.keys(e).sort().join(", "));
 const osc = e.moog_saw_create(48000);
 const ps = 128 * 4;
-const freq = e.malloc(ps);
-const out = e.malloc(ps);
+const freq = e.moog_saw_alloc(ps);
+const out = e.moog_saw_alloc(ps);
 const f = new Float32Array(e.memory.buffer, freq, 128);
 const o = new Float32Array(e.memory.buffer, out, 128);
 f.fill(480);
@@ -311,8 +347,6 @@ e.moog_saw_process(osc, freq, 0, out, 128);
 console.log("phase:", e.moog_saw_phase(osc).toFixed(4), "expected:", ((128 * 480 / 48000) % 1).toFixed(4));
 console.log("finite:", o.every((x) => Number.isFinite(x)));
 e.moog_saw_destroy(osc);
-e.free(freq, ps);
-e.free(out, ps);
 ```
 
 Run:
@@ -321,7 +355,10 @@ Run:
 node /tmp/wasmtest.mjs
 ```
 
-Expected: exports list contains `malloc`, `free`, `memory`, and all `moog_saw_*` functions; `phase` prints `0.2800`; `finite` prints `true`. Delete `/tmp/wasmtest.mjs` afterward.
+Expected: the exports list contains `memory`, `moog_saw_alloc`, and all
+`moog_saw_*` functions, and does NOT contain `malloc` or `free` (confirm this
+explicitly); `phase` prints `0.2800`; `finite` prints `true`. Delete
+`/tmp/wasmtest.mjs` afterward.
 
 - [ ] **Step 5: Run the full native test suite still green**
 
@@ -593,9 +630,9 @@ class MoogSawProcessor extends AudioWorkletProcessor {
     this.oscPtr = this.exports.moog_saw_create(data.sampleRate);
 
     const bufSize = 128 * 4;
-    this.freqBufPtr = this.exports.malloc(bufSize);
-    this.syncBufPtr = this.exports.malloc(bufSize);
-    this.outBufPtr = this.exports.malloc(bufSize);
+    this.freqBufPtr = this.exports.moog_saw_alloc(bufSize);
+    this.syncBufPtr = this.exports.moog_saw_alloc(bufSize);
+    this.outBufPtr = this.exports.moog_saw_alloc(bufSize);
     this.ready = true;
   }
 
@@ -1291,3 +1328,4 @@ Expected: PR opened against `main`. Return the PR URL in your final report.
   - CI + docs (Task 8), PR (Task 9).
 - No placeholders: `throw new Error("implement in Task 6 ...")` markers are intentional placeholders for the implementer's porting work and are called out as such in each step; they are not "TBD" ambiguity but explicit work items with the source reference given (the template URL and the surrounding code shape).
 - Type consistency: `createMoogSawNode(ctx): Promise<AudioWorkletNode>` is defined in Task 4 and consumed in Tasks 5/6. `registerProcessor('moog-saw', ...)` is consistent across Tasks 4/5/6. `Synth` methods (`setWave`, `setCutoff`, `setDelay`, `setSub`, `noteOn`, `noteOff`) are used consistently in Task 6.
+- ABI consistency: `moog_saw_alloc(size: usize) -> *mut u8` is the only JS-callable allocation export, defined in Task 2 and consumed in Task 4's `processor.ts`. No `malloc`/`free` appears anywhere in the public API. The cfg-gating (`#[cfg(not(test))]`) and profile `panic = "abort"` (dev + release) from Task 1/2 are what keep `cargo test` green with the `#![no_std]` wasm crate present.
