@@ -13,7 +13,20 @@ dev`.
 - **Rust workspace** at repo root with two member crates: `moog_saw` (core),
   `moog_saw_wasm` (WASM cdylib).
 - **WASM crate**: plain cdylib with C-ABI exports (no wasm-bindgen). Re-exports
-  `moog_saw::ffi`. Exposes `malloc`/`free`.
+  `moog_saw::ffi`. Exposes a single init-time allocation primitive,
+  `moog_saw_alloc(size) -> *mut u8`. It does NOT expose `malloc`/`free` (there
+  is no general-purpose allocator in the public API).
+- **Buffer ownership**: the WASM crate owns the fixed per-instance freq, sync,
+  and output buffers. A processor reserves them once at init via
+  `moog_saw_alloc`, wraps the returned pointers in `Float32Array` views over
+  the instance memory, and reuses them every audio block. No allocation in the
+  realtime path.
+- **Timeline / ABI stability context**: many Rust-to-wasm audio projects
+  (glicol, wasm-audio-worklet, wasm-loop-player) expose a single init-time
+  allocator export rather than raw malloc/free. This spec follows that
+  precedent to keep the JS-facing API clean and to avoid coupling JS to a
+  general allocator. The static-heap bump allocator is part of the module's
+  fixed memory, so buffers never move and JS views stay valid.
 - **AudioWorklet loading**: main thread compiles WASM with
   `WebAssembly.compileStreaming`, passes the `WebAssembly.Module` to the
   processor via `postMessage`. The processor instantiates the module directly
@@ -27,6 +40,9 @@ dev`.
 - **AudioWorklet API**: frequency AudioParam + sync audio input.
 - **Demo**: full template adaptation. Saw uses the moog saw; sine/square/tri
   stay native. Polyphonic, one AudioWorkletNode (and WASM instance) per note.
+  Multiple oscillators are supported as multiple nodes/instances sharing one
+  compiled `WebAssembly.Module`; each instance owns independent memory and
+  buffers.
 
 ## Repo layout
 
@@ -86,8 +102,8 @@ moog_saw = { path = "../moog_saw" }
 
 ### Rust API (`moog_saw_wasm/src/lib.rs`)
 
-Re-exports the C-ABI functions and provides a global allocator plus
-`malloc`/`free` for JS-side memory management:
+Re-exports the C-ABI functions and provides a global allocator plus a single
+`moog_saw_alloc` primitive for JS-side fixed-buffer reservation:
 
 ```rust
 #![no_std]
@@ -100,15 +116,22 @@ mod allocator { ... }
 pub use moog_saw::ffi::*;
 
 #[unsafe(no_mangle)]
-pub extern "C" fn malloc(size: usize) -> *mut u8 { ... }
-
-#[unsafe(no_mangle)]
-pub extern "C" fn free(ptr: *mut u8, size: usize) { ... }
+pub extern "C" fn moog_saw_alloc(size: usize) -> *mut u8 { ... }
 ```
 
 The core `moog_saw::ffi` already exports `moog_saw_create`, `moog_saw_destroy`,
 `moog_saw_reset`, `moog_saw_set_frequency`, `moog_saw_process`,
-`moog_saw_process_sample`, `moog_saw_p`, `moog_saw_waveform`.
+`moog_saw_process_sample`, `moog_saw_p`, `moog_saw_waveform`. The WASM crate
+re-exports all of them and adds `moog_saw_alloc`, `memory`.
+
+`moog_saw_alloc` is the only JS-callable allocation export. There is no
+`malloc`, `free`, or `dealloc`. The processor calls `moog_saw_alloc` exactly
+three times at init (freq, sync, output buffers, `128 * 4` bytes each). Because
+the bump allocator runs over a static heap inside the module's fixed memory,
+`moog_saw_alloc` never grows wasm memory, so the `Float32Array` views the JS
+side creates stay valid for the life of the instance (no wasm-memory-growth
+invalidation). Buffers and oscillator state die together when the node is torn
+down; there is no per-buffer free.
 
 Build:
 ```
@@ -199,9 +222,9 @@ class MoogSawProcessor extends AudioWorkletProcessor {
     this.oscPtr = this.exports.moog_saw_create(sampleRate);
 
     const bufSize = 128 * 4;
-    this.freqBufPtr = this.exports.malloc(bufSize);
-    this.syncBufPtr = this.exports.malloc(bufSize);
-    this.outBufPtr = this.exports.malloc(bufSize);
+    this.freqBufPtr = this.exports.moog_saw_alloc(bufSize);
+    this.syncBufPtr = this.exports.moog_saw_alloc(bufSize);
+    this.outBufPtr = this.exports.moog_saw_alloc(bufSize);
     this.ready = true;
   }
 
@@ -245,7 +268,11 @@ Key details:
 - **sync**: `inputs[0][0]` copied to WASM memory; null pointer if disconnected.
 - **rendering**: `moog_saw_process` full 128-frame blocks. Block-level sync
   detection in core DSP handles sync events.
-- **memory**: buffers allocated once in `init()`, reused per block.
+- **memory**: fixed per-instance buffers reserved once in `init()` via
+  `moog_saw_alloc`, wrapped in `Float32Array` views, reused per block. No
+  allocation in the realtime path. Each node instantiates its own WASM
+  instance, so each has independent buffers and state (multi-oscillator
+  support).
 - **init timing**: `init()` is async; `process()` returns `true` until init
   completes.
 
@@ -312,8 +339,11 @@ Adaptations for the moog saw:
 - **Signal chain**: moog saw node -> shared per-note envelope gain -> shared
   filter (lowpass) -> delay -> analyser. Same as the template's existing chain,
   with the oscillator replaced.
-- **noteOff**: release the envelope, schedule node teardown, and free the WASM
-  instance (via a `destroy` message handled by the processor `destructor()`).
+- **noteOff**: release the envelope, then schedule node teardown. The processor
+  instance (oscillator state and its fixed buffers) is dropped with the node; a
+  `destroy` message handled by the processor `destructor()` frees the WASM
+  instance (which reclaims the bump-allocated buffers). There is no per-buffer
+  `free`.
 - **Sub oscillator, filter knob, delay toggles, oscilloscope, spectrum**:
   unchanged from the template.
 
