@@ -53,9 +53,17 @@ unsafe impl GlobalAlloc for WasmAllocator {
 static ALLOC: WasmAllocator = WasmAllocator;
 
 #[cfg(not(test))]
+#[cfg(target_arch = "wasm32")]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
+}
+
+#[cfg(not(test))]
+#[cfg(not(target_arch = "wasm32"))]
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    loop {}
 }
 
 // Re-export every C-ABI function from the core crate's public ffi module.
