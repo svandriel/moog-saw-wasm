@@ -15,3 +15,21 @@ jobs:
       - run: cargo build --release
       - name: Benchmark (display only)
         run: cargo bench --bench process --bench primitives -- --quick
+
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cargo build --release --target wasm32-unknown-unknown -p moog_saw_wasm
+      - name: Install pnpm
+        run: corepack enable
+      - working-directory: web
+        run: pnpm install --frozen-lockfile
+      - working-directory: web
+        run: pnpm run build
