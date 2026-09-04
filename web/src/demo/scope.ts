@@ -66,11 +66,19 @@ export function runVisualizers(
     sctx.strokeStyle = grad;
     sctx.beginPath();
 
-    const n = 1024;
+    // Find index of first zero crossing
+    let start = 0;
+    for (let i = 1; i < timeData.length / 2; i++) {
+      if (timeData[i - 1] < 0 && timeData[i] >= 0) {
+        start = i;
+        break;
+      }
+    }
+    const n = Math.min(timeData.length - start, 1024);
     for (let i = 0; i < n; i++) {
       let v: number;
       if (analyser && active) {
-        v = timeData[i] * 1.6;
+        v = timeData[i + start] * 1.6;
       } else {
         v =
           waveFn((i / n) * 3 + fakePhase, waveRef()) *
@@ -118,9 +126,7 @@ export function runVisualizers(
       } else {
         mag =
           0.08 +
-          0.06 *
-            Math.sin(t * 2 + i * 0.35) *
-            Math.sin(t * 0.7 + i * 0.1);
+          0.06 * Math.sin(t * 2 + i * 0.35) * Math.sin(t * 0.7 + i * 0.1);
         mag = Math.max(0, mag);
       }
       const a = (i / bars) * Math.PI * 2 - Math.PI / 2;

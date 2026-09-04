@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "wasm:build": "node scripts/copy-wasm.mjs",
-    "wasm:watch": "cargo-watch --no-gitignore -x \"build --release --target wasm32-unknown-unknown -p moog_saw_wasm\" -s \"node web/scripts/copy-wasm.mjs\"",
+    "wasm:watch": "cargo-watch -x \"build --release --target wasm32-unknown-unknown -p moog_saw_wasm\" -s \"node web/scripts/copy-wasm.mjs\" -i \"web/src/lib/moog-saw.wasm\"",
     "vite": "vite",
     "dev": "run-p wasm:watch vite",
     "build": "run-s wasm:build tsc vite:build",
