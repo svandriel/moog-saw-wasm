@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": false,
+    "outDir": "dist-lib-tsc",
+    "types": []
+  },
+  "include": ["dist-lib-tsc-src/lib-env.d.ts", "dist-lib-tsc-src/index.ts", "dist-lib-tsc-src/processor.ts"]
+}

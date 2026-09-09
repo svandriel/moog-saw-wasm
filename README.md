@@ -47,8 +47,39 @@ DSP runs in normalized phase units `[0,1)`; output is approximately `[-1,+1]`.
 - bit-exact parity checks against golden WAV fixtures (`tests/fixtures/`,
   float32 mono 48 kHz, frequencies 55–3520 Hz).
 
+## Web build
+
+The repo is a Cargo workspace with three parts:
+
+- `moog_saw`: the `#![no_std]` DSP core.
+- `moog_saw_wasm`: a `cdylib` that exports the core over the C ABI and
+  compiles to `wasm32-unknown-unknown`.
+- `web/`: a pnpm + Vite TypeScript app with a demo synth and an installable
+  `moog-saw` NPM package built from `web/src/lib/`.
+
+Run the demo:
+
+```sh
+cd web
+pnpm install
+pnpm run dev
+```
+
+The wasm build needs the rustup toolchain. On a machine where the stable
+toolchain is not on PATH, prepend its `bin` directory, for example:
+
+```sh
+export PATH="$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:$PATH"
+```
+
+The demo runs the DSP in an AudioWorklet. The main thread fetches the compiled
+wasm bytes and posts them to the processor, which instantiates the module and
+calls into the exported functions to render audio on the audio thread.
+
+The publishable deliverable is the `moog-saw` NPM package under
+`web/dist-lib`, built with `pnpm run lib`.
+
 ## Scope / limitations
 
-This models the waveform, not a complete anti-aliased oscillator. Oversampling,
-BLEP/BLAMP correction, and the browser-level AudioWorklet wrapper are expected
-to live outside this core API.
+This models the waveform, not a complete anti-aliased oscillator. Oversampling
+and BLEP/BLAMP correction remain out of scope for the DSP core.

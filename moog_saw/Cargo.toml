@@ -1,0 +1,21 @@
+[package]
+name = "moog_saw"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib"]
+
+[[bench]]
+name = "process"
+harness = false
+
+[[bench]]
+name = "primitives"
+harness = false
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+criterion = "0.5"
