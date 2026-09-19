@@ -11,6 +11,18 @@ export function runVisualizers(
   const freqData = new Uint8Array(1024);
   let fakePhase = 0;
 
+  function getCssVariableValue(name: string): string {
+    return getComputedStyle(document.documentElement).getPropertyValue(name);
+  }
+
+  const pink = getCssVariableValue("--pink");
+  const lav = getCssVariableValue("--lav");
+  const blue = getCssVariableValue("--blue");
+
+  const scopeColor1 = pink;
+  const scopeColor2 = lav;
+  const scopeColor3 = blue;
+
   function fit(c: HTMLCanvasElement): { w: number; h: number; dpr: number } {
     const r = (c.parentNode as HTMLElement).getBoundingClientRect();
     const dpr = Math.min(3, window.devicePixelRatio || 1);
@@ -21,14 +33,6 @@ export function runVisualizers(
       c.height = h;
     }
     return { w, h, dpr };
-  }
-
-  function waveFn(t: number, wave: string): number {
-    const x = t % 1;
-    if (wave === "sine") return Math.sin(x * Math.PI * 2);
-    if (wave === "sawtooth") return x * 2 - 1;
-    if (wave === "square") return x < 0.5 ? 1 : -1;
-    return 1 - Math.abs(x * 4 - 2);
   }
 
   function drawScope() {
@@ -55,9 +59,9 @@ export function runVisualizers(
     if (analyser) analyser.getFloatTimeDomainData(timeData);
 
     const grad = sctx.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, "#ff2d95");
-    grad.addColorStop(0.5, "#b78bff");
-    grad.addColorStop(1, "#2de2ff");
+    grad.addColorStop(0, scopeColor1);
+    grad.addColorStop(0.5, scopeColor2);
+    grad.addColorStop(1, scopeColor3);
 
     sctx.lineWidth = 2.2 * dpr;
     sctx.lineJoin = "round";
@@ -80,10 +84,7 @@ export function runVisualizers(
       if (analyser && active) {
         v = timeData[i + start] * 1.6;
       } else {
-        v =
-          waveFn((i / n) * 3 + fakePhase, waveRef()) *
-          0.22 *
-          (0.7 + 0.3 * Math.sin(fakePhase * 4));
+        v = 0;
       }
       const x = (i / (n - 1)) * w;
       const y = h / 2 - (v * h) / 2;
@@ -137,9 +138,9 @@ export function runVisualizers(
       const y1 = cy + Math.sin(a) * (R + len);
 
       const g = pctx.createLinearGradient(x0, y0, x1, y1);
-      g.addColorStop(0, "#2de2ff");
-      g.addColorStop(0.55, "#b78bff");
-      g.addColorStop(1, "#ff2d95");
+      g.addColorStop(0, scopeColor1);
+      g.addColorStop(0.55, scopeColor2);
+      g.addColorStop(1, scopeColor3);
       pctx.strokeStyle = g;
       pctx.lineWidth = Math.max(1.5, ((Math.PI * 2 * R) / bars) * 0.55);
       pctx.lineCap = "round";
